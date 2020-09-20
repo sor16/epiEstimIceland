@@ -1,0 +1,33 @@
+---
+title: "COVID-19 sviðsmyndir"
+author: "Sölvi Rögnvaldsson"
+date: "9/10/2020"
+output: html_document
+---
+## Inngangur
+Á þessari heimasíðu er rýnt í sviðsmyndir COVID-19 faraldursins með hjálp faraldsfræðilegs líkans sem bygir á aðferð sem heitir EpiEstim (tilvísun). Sviðsmyndirnar byggjast á forsendum um aðgerðir á landamærum, framtíðarþróun smitstuðulsins (R) sem og virkni smitrakningar. 
+
+## Forsendur
+### Smitstuðull
+### Landamæraaðgerðir
+Gert var ráð fyrir að hlutfall smitaðra á landamærunum sé það sama og það hefur verið frá 19. ágúst, þegar lagt var á að allir sem kæmu til landsins þyrftu að fara í tvær sýnatökur. Þá var reynt að meta hlutfall þerra sem kæmust smitaðir inn í samfélagið fyrir eftirfarandi tilfelli: 
+
+* Engin sýnataka er við landamærin
+* Allir sem koma til landsins þurfa að fara í eina sýnatöku
+* Allir sem koma til landsins þurfa að fara í tvær sýnatökur 
+
+Forsendan til þess að leggja mat á þetta var sú að þegar allir sem koma til landsins fara í tvær sýnatökur komi ekki upp nein influtt smit. Til þess að meta hlutfall greindra smita á landamærunum við eina skimun var hlutfall tekið milli þeirra sem greindust við fyrstu skimun á móti fjölda sýna fyrir fyrstu skimun frá 19. ágúst. Fyrir enga sýnatöku við landamærin var tekið hlutfall þeirra sem greinast við landamærin í heild sinni á móti fjölda sýna í fyrstu skimun en það ætti að vera fjöldi þeirra sem komast til landsins (því ef fjöldi sýna í seinni skimun er tekin með er fjöldi þeirra sem fara í báðar sýnatökur tvítalinn).
+Þá var einnig gert ráð fyrir að þeir sem komi til landsins fylgi reglum um sóttkví og aðrar sóttvarnir við komu sína.
+
+### Virkni smitrakningar
+
+## Stærðfræðileg framsetning
+
+### Landamæraaðgerðir
+
+
+
+
+## Næstu skref
+
+
