@@ -1,4 +1,4 @@
-Make_EpiEstim_Model <- function(model_name,end_date = Sys.Date(),start_date=NULL,use_quarantine=F, warmup = 500, iters = 500, chains = 4) {
+Make_EpiEstim_Q_Model <- function(model_name,end_date = Sys.Date(),start_date=NULL, warmup = 500, iters = 500, chains = 4) {
     if(is.null(start_date)){
         start_date <- "2020-02-28"
     }
@@ -6,7 +6,7 @@ Make_EpiEstim_Model <- function(model_name,end_date = Sys.Date(),start_date=NULL
         select(date = Dagsetning, local = Innanlands_Smit,border_1=Landamaeri_Smit_1,border_2=Landamaeri_Smit_2, imported = Innflutt_Smit,prop_quarantine=Hlutf_Sottkvi,num_quarantine=Fjoldi_Sottkvi) %>% 
         mutate(date = ymd(date),
                total = if_else(date >= ymd("2020-07-23"),local,local + imported),
-               prop_quarantine=if_else(use_quarantine & total!=0,num_quarantine/total,0)) %>% 
+               prop_quarantine=if_else(total!=0,num_quarantine/total,0)) %>% 
         filter(date >= ymd(start_date) & date <= ymd(end_date))
     
     # shape <- 4.5
@@ -22,7 +22,6 @@ Make_EpiEstim_Model <- function(model_name,end_date = Sys.Date(),start_date=NULL
     total <- d$total
     N_days <- length(local)
     prop_quarantine <- d$prop_quarantine
-
     
     stan_data <- list(
         N_days = N_days,
@@ -33,7 +32,7 @@ Make_EpiEstim_Model <- function(model_name,end_date = Sys.Date(),start_date=NULL
         prop_quarantine=prop_quarantine
     )
     
-    mod <- cmdstan_model(here("Stan", "EpiEstim.stan"))
+    mod <- cmdstan_model(here("Stan", "EpiEstim_Q.stan"))
     
     fit <- mod$sample(
         data = stan_data, 
@@ -44,9 +43,9 @@ Make_EpiEstim_Model <- function(model_name,end_date = Sys.Date(),start_date=NULL
         iter_warmup = warmup,
         max_treedepth = 15,
         init = 0,
-        refresh = 100
+        refresh = 10
     )
     
-    fit$save_object(file = here("Results", "EpiEstim", str_c(model_name,'_', Sys.Date(),if_else(use_quarantine,"_w_quarantine","") ,".rds")))
+    fit$save_object(file = here("Results", "EpiEstim", str_c(model_name,'_', Sys.Date(),".rds")))
     
 }
