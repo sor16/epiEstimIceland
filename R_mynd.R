@@ -6,13 +6,10 @@ library(tidyverse)
 library(cowplot)
 library(scales)
 library(lubridate)
-library(plotly)
 library(cmdstanr)
 library(posterior)
 library(tidybayes)
 library(here)
-library(gganimate)
-library(data.table)
 library(zoo)
 
 theme_set(theme_classic(base_size = 12) + 
@@ -51,10 +48,10 @@ intervention_lab_dat <- separate_rows(intervention_dat,lab,sep=',') %>%
 
 mod <- read_rds(here("Results", "EpiEstim", str_c("tot.Q.late.border_", fit_date,".rds")))
 m <- mod$draws() %>% as_draws_df
-rm(mod)
 
 breaks_type='month'
 
+# R_t plot
 p <- spread_draws(m, R[day]) %>% 
     group_by(day) %>% 
     summarise(lower_50 = quantile(R, 0.25),
@@ -89,8 +86,8 @@ p <- spread_draws(m, R[day]) %>%
     theme(axis.title = element_blank(),
           plot.margin = margin(5, 5, 5, 14))
 
-ggsave(paste0('~/epiEstimIceland/Results/Figures/','Rt_',Sys.Date(),'.pdf'),height=4.5,width=19,device='pdf')
-ggsave(paste0('~/epiEstimIceland/Results/Figures/','Rt_',Sys.Date(),'.png'),height=4.5,width=19,device='png')
+ggsave(here('Results','Figures',paste0('Rt_',Sys.Date(),'.pdf')),height=4.5,width=19,device='pdf')
+ggsave(here('Results','Figures',paste0('Rt_',Sys.Date(),'.png')),height=4.5,width=19,device='png')
 
 d <- read_csv("https://docs.google.com/spreadsheets/d/1xgDhtejTtcyy6EN5dbDp5W3TeJhKFRRgm6Xk0s0YFeA/export?format=csv&gid=1788393542",col_types=cols()) %>%
     select(date = Dagsetning, local = Innanlands_Smit,border_1=Landamaeri_Smit_1,border_2=Landamaeri_Smit_2, imported = Innflutt_Smit,prop_quarantine=Hlutf_Sottkvi,num_quarantine=Fjoldi_Sottkvi) %>% 
@@ -99,6 +96,7 @@ d <- read_csv("https://docs.google.com/spreadsheets/d/1xgDhtejTtcyy6EN5dbDp5W3Te
            prop_quarantine=if_else(total!=0,num_quarantine/total,0)) %>% 
     filter(date >= ymd(start_date) & date <= ymd(end_date))
 
+# Local cases plot with rolling mean
 lp<- d %>%
     mutate(rmean = c(rep(0,6),rollmean(local, 7))) %>% 
     ggplot(aes(date, local)) +
@@ -122,3 +120,36 @@ lp<- d %>%
 plot_grid(p, lp, ncol = 1, align='v') +
     ggsave(here("Results", "Figures", paste0("R_and_local_cases_",Sys.Date(),".png")), device = "png", 
            height = 4.5 * 2, width = 19)
+
+# future_R <- function(R_t,t) {
+#      R_t*0.9^t
+# }
+
+# SI <- get_SI_vec(nrow(d))
+# d <- mutate(d,lambda=calculate_lambda(total,SI,prop_quarantine))
+# R_draws <- spread_draws(m, R[day]) %>% 
+#     group_by(day) %>% 
+#     mutate(iter = row_number()) %>%
+#     ungroup %>% 
+#     select(iter, day, R)
+# pred_days <- 10
+
+#plot_dat <- scenario(m=m,d=d, R_draws=R_draws, R_fun = future_R, future_prop_quarantine=rep(0.55, pred_days-2), prop_imported=0,pred_days=10)
+
+# pred_plot <- plot_dat %>% filter(name=="R") %>%
+#     ggplot() +
+#     geom_ribbon(aes(date, ymin = lower, ymax = upper,fill = factor(-prob)), alpha = 0.7) +
+#     geom_hline(yintercept = 1,col='#BC3C29FF') +
+#     geom_label(data = intervention_lab_dat, aes(lab_pos_x, lab_pos_y,label=lab), hjust = 0, label.size = NA, fill = 'white') +
+#     geom_vline(xintercept = as.numeric(intervention_dat$date), lty = 2) + 
+#     scale_fill_brewer() +
+#     scale_x_date(breaks = sort(c(fill_up_dates, intervention_dat$date)),
+#                  labels = icelandic_dates,
+#                  expand = expansion(add = 0),
+#                  limits = c(ymd(start_date) - 1, ymd(end_date) + 10)) +
+#     scale_y_continuous(breaks = pretty_breaks(8),expand = c(0,0)) +
+#     ggtitle(label = waiver(),
+#             subtitle = latex2exp::TeX("Þróun smitstuðulsins ($R_t$) innanlands utan sóttkvíar")) +
+#     theme(axis.title = element_blank(),
+#           plot.margin = margin(5, 5, 5, 14))
+# pred_plot
