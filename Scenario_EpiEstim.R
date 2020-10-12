@@ -15,13 +15,14 @@ library(gganimate)
 library(data.table)
 
 #### Help functions ####
-make_preds <- function(d,...) {
-    for (t in seq(N_days, nrow(d))) {
+make_preds <- function(draws,N_days, SI,...) {
+    for (t in seq(N_days, nrow(draws))) {
         idx_range <- (t - 1):(t - length(SI)+1)
-        d$lambda[t] <- t((1-d$prop_quarantine[idx_range])*d$mu_hat[idx_range]) %*% head(SI,-1)
-        d$mu_hat[t] <- d$mu_hat[t]+d$lambda[t] * d$R[t] ## add artificially imported infections already stored in mu_hat[t]
+        draws$lambda[t] <- t((1-draws$prop_quarantine[idx_range])*draws$mu_hat[idx_range]) %*% head(SI,-1)
+        draws$lambda_q[t] <- t(draws$prop_quarantine[idx_range]*draws$mu_hat[idx_range]) %*% head(SI,-1)
+        draws$mu_hat[t] <- draws$lambda[t] * draws$R[t] + draws$lambda_q[t] * draws$R_q[t] ## add artificially imported infections already stored in mu_hat[t]
     }
-    return(d)
+    return(draws)
 }
 
 get_SI_vec <- function(N_days,shape=1.54,rate=0.28){
@@ -35,25 +36,42 @@ get_SI_vec <- function(N_days,shape=1.54,rate=0.28){
     return(SI_dat$p)
 }
 
-calculate_lambda <- function(total,SI,prop_quarantine){
-    N_days <- length(total)
+calculate_lambda <- function(cases,SI,p_vec){
+    N_days <- length(cases)
     lambda <- numeric(N_days)
     for (t in 2:N_days) {
-        lambda[t] <- t(head((1-prop_quarantine)*d$total, t - 1)) %*% tail(rev(SI), t - 1) / sum(tail(rev(SI), t - 1))
+        lambda[t] <- t(head(p_vec*cases, t - 1)) %*% tail(rev(SI), t - 1) / sum(tail(rev(SI), t - 1))
     }
     return(lambda)
 }
 
 
-scenario <- function(m,d,R_draws,R_fun,prop_imported,future_prop_quarantine=rep(0,pred_days-1),num_border_tests=2000,pred_days=42,use_quarantine=T){
-    N_iter <- max(R_draws$iter)
+scenario <- function(m,d,R_fun,prop_imported=0,future_prop_quarantine=rep(0,pred_days-1),num_border_tests=2000,pred_days=42,use_quarantine=T) {
     N_days <- nrow(d)
+    SI <- get_SI_vec(N_days)
+    lambda_vec <- calculate_lambda(d$total,SI,1-d$prop_quarantine)
+    lambda_q_vec <- calculate_lambda(d$total,SI,d$prop_quarantine) 
+    R_q_draws <- spread_draws(m,log_R_q) %>%
+                    mutate(iter = row_number()) %>%
+                    mutate(R_q=exp(log_R_q)) %>%
+                    select(iter,R_q)
+    R_draws <- spread_draws(m, R[day]) %>% 
+                group_by(day) %>% 
+                mutate(iter = row_number()) %>%
+                ungroup() %>% 
+                select(iter, day, R) %>%
+                inner_join(R_q_draws,by='iter')
+    N_iter <- max(R_draws$iter)
     last_R <- R_draws %>% 
               filter(day == max(day)) %>% 
               .$R
+    last_R_q <- R_draws %>% 
+                filter(day == max(day)) %>% 
+                .$R_q
     future_R <- crossing(day = max(R_draws$day) + seq_len(pred_days),iter = seq_len(N_iter)) %>% 
                 group_by(iter) %>% 
-                mutate(R = R_fun(last_R[iter],day-N_days)) %>%
+                mutate(R = R_fun(last_R[iter],day-N_days),
+                       R_q = last_R_q[iter]) %>%
                        #R = as.numeric(R) + cumsum(rnorm(n(), sd = 0.02))) %>% 
                 ungroup()
     
@@ -61,11 +79,11 @@ scenario <- function(m,d,R_draws,R_fun,prop_imported,future_prop_quarantine=rep(
                 bind_rows(future_R) %>% 
                 group_by(iter) %>% 
                 mutate(prop_quarantine=c(d$prop_quarantine,future_prop_quarantine),
-                       lambda = c(d$lambda,rep(0,pred_days-1)),
-                       mu_hat = R * lambda+(day>N_days)*as.numeric(rbinom(n(),size=num_border_tests,prob = prop_imported))) %>% 
+                       lambda = c(lambda_vec, rep(0,pred_days-1)),
+                       lambda_q = c(lambda_q_vec, rep(0,pred_days-1)),
+                       mu_hat = R * lambda + R_q*lambda_q) %>% #(day>N_days)*as.numeric(rbinom(n(),size=num_border_tests,prob = prop_imported))) %>% # 
                 # filter(iter %in% 1:100) %>% 
-                group_by(iter) %>% 
-                group_modify(make_preds) %>% 
+                group_modify(make_preds, N_days=N_days,SI=SI) %>% 
                 ungroup %>% 
                 mutate(y_hat = rnbinom(n(), mu = mu_hat, size = m$phi[iter])) %>% 
                 pivot_longer(c(-iter, -day, -lambda, -mu_hat)) %>% 
