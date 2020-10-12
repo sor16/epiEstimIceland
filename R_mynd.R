@@ -189,6 +189,7 @@ post_pred_lp
 
 point_d = d %>% mutate(point_color=if_else(date > ymd('2020-09-28'), 'orange', 'black'))
 
+#Comparison plot for old prediction
 compare_pred_lp <- plot_dat %>% filter(name=='y_hat') %>%
     ggplot(aes(date, ymin = lower, ymax = upper)) +
     geom_ribbon(aes(fill = factor(-prob)), alpha = 0.7) +
@@ -200,8 +201,11 @@ compare_pred_lp <- plot_dat %>% filter(name=='y_hat') %>%
                 expand = expansion(add = 0),
                 limits = c(ymd('2020-09-14'), ymd('2020-10-20'))) +
     scale_y_continuous(breaks = pretty_breaks(8), expand = expansion(mult = 0)) +
-    labs(subtitle = "Retrofitted local cases") +
+    labs(subtitle = "Innlend dagleg smit") +
     theme(axis.title = element_blank(),
           plot.margin = margin(5, 5, 5, 11),
           legend.title = element_blank()) 
 compare_pred_lp
+
+ggsave(here('Results','Figures',paste0('Local_cases_comparison_',Sys.Date(),'.png')),height=4.5,width=16,device='png')
+
