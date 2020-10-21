@@ -46,7 +46,8 @@ calculate_lambda <- function(cases,SI,p_vec){
 }
 
 
-scenario <- function(m,d,R_fun,prop_imported=0,future_prop_quarantine=rep(0,pred_days-1),num_border_tests=2000,pred_days=42,use_quarantine=T) {
+scenario <- function(m,d,R_fun,prop_imported=0,future_prop_quarantine=rep(0,pred_days-1),num_border_tests=2000,pred_days=42,use_quarantine=T, fit_date=Sys.Date()) {
+    d <- d %>% filter(date < fit_date)
     N_days <- nrow(d)
     SI <- get_SI_vec(N_days)
     lambda_vec <- calculate_lambda(d$total,SI,1-d$prop_quarantine)
@@ -75,7 +76,7 @@ scenario <- function(m,d,R_fun,prop_imported=0,future_prop_quarantine=rep(0,pred
                        #R = as.numeric(R) + cumsum(rnorm(n(), sd = 0.02))) %>% 
                 ungroup()
     
-    plot_dat <- R_draws %>% 
+    posterior_dat <- R_draws %>% 
                 bind_rows(future_R) %>% 
                 group_by(iter) %>% 
                 mutate(prop_quarantine=c(d$prop_quarantine,future_prop_quarantine),
@@ -86,23 +87,28 @@ scenario <- function(m,d,R_fun,prop_imported=0,future_prop_quarantine=rep(0,pred
                 group_modify(make_preds, N_days=N_days,SI=SI) %>% 
                 ungroup %>% 
                 mutate(y_hat = rnbinom(n(), mu = mu_hat, size = m$phi[iter])) %>% 
-                pivot_longer(c(-iter, -day, -lambda, -mu_hat)) %>% 
-                group_by(day, name) %>% 
-                summarise(lower_50 = quantile(value, 0.25),
-                          upper_50 = quantile(value, 0.75),
-                          lower_60 = quantile(value, 0.2),
-                          upper_60 = quantile(value, 0.8),
-                          lower_70 = quantile(value, 0.15),
-                          upper_70 = quantile(value, 0.85),
-                          lower_80 = quantile(value, 0.1),
-                          upper_80 = quantile(value, 0.9),
-                          lower_90 = quantile(value, 0.05),
-                          upper_90 = quantile(value, 0.95),
-                          lower_95 = quantile(value, 0.025),
-                          upper_95 = quantile(value, 0.975)) %>% 
-                pivot_longer(c(-day, -name), names_to = c("which", "prob"), names_sep = "_") %>% 
-                pivot_wider(names_from = which, values_from = value) %>% 
-                mutate(prob = parse_number(prob),
-                       date = ymd("2020-02-28") + day)
+                pivot_longer(c(-iter, -day, -lambda, -mu_hat))
+    return(posterior_dat)
+}
+
+summarize_posterior_dat <- function(posterior_dat) {
+    plot_dat <- posterior_dat %>% 
+        group_by(day, name) %>% 
+        summarise(lower_50 = quantile(value, 0.25),
+                  upper_50 = quantile(value, 0.75),
+                  lower_60 = quantile(value, 0.2),
+                  upper_60 = quantile(value, 0.8),
+                  lower_70 = quantile(value, 0.15),
+                  upper_70 = quantile(value, 0.85),
+                  lower_80 = quantile(value, 0.1),
+                  upper_80 = quantile(value, 0.9),
+                  lower_90 = quantile(value, 0.05),
+                  upper_90 = quantile(value, 0.95),
+                  lower_95 = quantile(value, 0.025),
+                  upper_95 = quantile(value, 0.975)) %>% 
+        pivot_longer(c(-day, -name), names_to = c("which", "prob"), names_sep = "_") %>% 
+        pivot_wider(names_from = which, values_from = value) %>% 
+        mutate(prob = parse_number(prob),
+               date = ymd("2020-02-28") + day)
     return(plot_dat)
 }

@@ -46,6 +46,6 @@ Make_EpiEstim_Q_Model <- function(model_name,end_date = Sys.Date(),start_date=NU
         refresh = 10
     )
     
-    fit$save_object(file = here("Results", "EpiEstim", str_c(model_name,'_', Sys.Date(),".rds")))
+    fit$save_object(file = here("Results", "EpiEstim", str_c(model_name,'_', end_date,".rds")))
     
 }
