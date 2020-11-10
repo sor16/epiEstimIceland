@@ -11,6 +11,7 @@ library(posterior)
 library(tidybayes)
 library(here)
 library(zoo)
+library(googlesheets4)
 
 source('Scenario_EpiEstim.R')
 
@@ -60,16 +61,34 @@ intervention_lab_dat <- separate_rows(intervention_dat,lab,sep=',') %>%
 
 mod <- read_rds(here("Results", "EpiEstim", str_c("tot.Q.late.border_", fit_date,".rds")))
 m <- mod$draws() %>% as_draws_df
-
+               
 d <- read_csv("https://docs.google.com/spreadsheets/d/1xgDhtejTtcyy6EN5dbDp5W3TeJhKFRRgm6Xk0s0YFeA/export?format=csv&gid=1788393542", col_types=cols()) %>%
-    select(date = Dagsetning, local = Innanlands_Smit,border_1=Landamaeri_Smit_1,border_2=Landamaeri_Smit_2, imported = Innflutt_Smit,prop_quarantine=Hlutf_Sottkvi,num_quarantine=Fjoldi_Sottkvi) %>% 
+    select(date = Dagsetning, local = Innanlands_Smit,border_1=Landamaeri_Smit_1,border_2=Landamaeri_Smit_2, imported = Innflutt_Smit,prop_quarantine=Hlutf_Sottkvi,num_quarantine=Fjoldi_Sottkvi) %>%
     mutate(date = ymd(date),
            total = if_else(date >= ymd("2020-07-23"),local,local + imported),
-           prop_quarantine=if_else(total!=0,num_quarantine/total,0)) %>% 
+           prop_quarantine=if_else(total!=0,num_quarantine/total,0)) %>%
     filter(date >= ymd(pandemic_start_date) & date <= ymd(end_date))
 
 #diagnosis_dat <- read_csv("https://docs.google.com/spreadsheets/d/1gbn2CUSPFExQ4mdHsC6Iq671N46ogS8G4mGgISb4x4g/gviz/tq?tqx=out:csv&sheet=FjoldiSmitaEftirDogum", col_types = cols())
 
+diagnosis_dat = read_sheet("https://docs.google.com/spreadsheets/d/1gbn2CUSPFExQ4mdHsC6Iq671N46ogS8G4mGgISb4x4g/edit#gid=1720508877", range = "FjoldiSmitaEftirDogum") %>%
+                rename(date = ...1,
+                       lsh = "Sýkla- og veirufræðideild LSH",
+                       ie = "Íslensk erfðagreining",
+                       border = "Landamæraskimun")
+quarantine_dat = read_sheet("https://docs.google.com/spreadsheets/d/1gbn2CUSPFExQ4mdHsC6Iq671N46ogS8G4mGgISb4x4g/edit#gid=1720508877", range = "SottkviVidVeikindiAnLandamaera") %>%
+                 rename(prop_quarantine = "Eru í sóttkví við greiningu",
+                        date = "Dags.") %>%
+                 mutate(prop_quarantine = prop_quarantine/100) %>%
+                 select(date, prop_quarantine)
+
+d <- inner_join(diagnosis_dat, quarantine_dat, by="date") %>%
+     mutate(local = lsh+ie,
+            total = local+border,
+            num_quarantine = round(prop_quarantine*local),
+            date=dmy(date)) %>%
+     select(date, local, border, total, prop_quarantine, num_quarantine)
+ 
 #",col_names=c('date', 'lsh', 'ie', 'border'), col_types=cols())
 #quarantine_dat <- https://docs.google.com/spreadsheets/d/1gbn2CUSPFExQ4mdHsC6Iq671N46ogS8G4mGgISb4x4g/edit#gid=2102664472
 
@@ -115,8 +134,16 @@ rp
 # ggsave(here('Results','Figures','R_t', paste0('Rt_',Sys.Date(),'.png')),height=4.5,width=19,device='png')
 
 # Local cases plot with rolling mean
+rollingmean <- function(x, time) {
+    out = rep(0,time-1)
+    for(i in time:length(x)) {
+        out[i] = sum(x[(i-6):i])/time  
+    }
+    out
+}
+
 lp<- d %>%
-    mutate(rmean = c(rep(0,6),rollmean(local, 7))) %>% 
+    mutate(rmean = rollingmean(local, 7)) %>% 
     ggplot(aes(date, local)) +
     geom_point(
         data = d, aes(x=date, y=local), inherit.aes = F
@@ -169,10 +196,10 @@ march_lowering <- coef(exp_fit_march)['day'] %>% as.numeric %>% exp
 scenarios = c('constant', 'lowering')
 examine_start_date = '2020-07-17'
 
-intervention_dat <- tibble(date=c(ymd(c("2020-03-16","2020-03-24","2020-05-04","2020-06-15","2020-07-31","2020-08-19",'2020-09-07', '2020-09-18', '2020-10-07'), Sys.Date())),
+intervention_dat <- tibble(date=c(ymd(c("2020-03-16","2020-03-24","2020-05-04","2020-06-15","2020-07-31","2020-08-19",'2020-09-07', '2020-09-18', '2020-10-07', '2020-12-01'), Sys.Date())),
                            lab=c('Samkomur,takmarkaðar,við 100 manns','Samkomur,takmarkaðar,við 20 manns','Fjöldatakmarkanir,rýmkaðar'
                                  ,'Landamæraskimun,hefst','Samkomur,takmarkaðar,við 100 manns','Sóttkví milli,tveggja skimanna,á landamærunum'
-                                 ,'Eins metra regla,í stað tveggja,metra reglu', 'Skemmtistöðum,og krám á,höfuðborgar-,svæðinu lokað,tímabundið', 'Hertar,samkomu-,takmarkanir', ''),
+                                 ,'Eins metra regla,í stað tveggja,metra reglu', 'Skemmtistöðum,og krám á,höfuðborgar-,svæðinu lokað,tímabundið', 'Hertar,samkomu-,takmarkanir', '', ''),
                            lab_pos_x=date,
                            lab_pos_y=height)
 
@@ -183,7 +210,7 @@ if(examine_start_date == '2020-02-28') {
     intervention_dat$lab_pos_x[7] <- ymd('2020-08-22')
     intervention_dat$lab_pos_x[9] <- ymd('2020-09-25')
 } else {
-    intervention_dat$lab_pos_x[7] <- ymd('2020-08-31')
+    intervention_dat$lab_pos_x[7] <- ymd('2020-08-27')
     intervention_dat$lab_pos_x[8] <- ymd('2020-09-18')+1
 }
 intervention_dat$lab_pos_y[7] <- height+extra_diff
@@ -193,7 +220,7 @@ intervention_dat$lab_pos_y[9] <- height-1
 intervention_lab_dat <- separate_rows(intervention_dat,lab,sep=',') %>% 
     group_by(date) %>% 
     mutate(lab_pos_y=seq(lab_pos_y[1],lab_pos_y[1]-diff*(n()-1),by=-diff))
-
+scene = 1
 for(scene in 1:2) {
     future_R <- function(R_t,t) {
         R_t
@@ -204,7 +231,7 @@ for(scene in 1:2) {
         }   
     }
 
-    pred_days <- 10
+    pred_days <- 42
     
     fit_date <- Sys.Date()
     
@@ -234,7 +261,7 @@ for(scene in 1:2) {
         scale_x_date(breaks = sort(c(fill_up_dates, intervention_dat$date)),
                      labels = icelandic_dates,
                      expand = expansion(add = 0),
-                     limits = c(ymd('2020-07-17'), ymd(end_date) + pred_days-1)) +
+                     limits = c(ymd('2020-07-17'), ymd('2020-12-04'))) +#ymd(end_date) + pred_days-1)) +
         scale_y_continuous(breaks = pretty_breaks(8),expand = c(0,0)) +
         ggtitle(label = waiver(),
                 subtitle = latex2exp::TeX("Sviðsmynd um þróun smitstuðulsins ($R_t$) innanlands utan sóttkvíar")) +
@@ -247,17 +274,20 @@ for(scene in 1:2) {
         ggplot(aes(date, ymin = lower, ymax = upper)) +
         geom_ribbon(aes(fill = factor(-prob)), alpha = 0.7) +
         geom_point(data = d, aes(x = date, y = local), inherit.aes = F) +
-        geom_vline(xintercept = as.numeric(intervention_dat$date), lty = 2) +     
+        geom_vline(xintercept = as.numeric(intervention_dat$date), lty = 2) +    
+        geom_hline(yintercept=5, col='#BC3C29FF') +
         scale_fill_brewer() +
-        scale_x_date(limits = c(ymd("2020-07-17"), ymd(end_date) + pred_days-1), 
+        scale_x_date(limits = c(ymd("2020-07-17"), ymd('2020-12-04')),#ymd(end_date) + pred_days-1))
                      expand = expansion(add = 0),
                      breaks = sort(c(fill_up_dates, intervention_dat$date)),
                      labels = icelandic_dates) +
         scale_y_continuous(breaks = pretty_breaks(8), 
                            expand = expansion(mult = 0)) +
-        coord_cartesian(ylim = c(0, 350)) +
+        coord_cartesian(ylim = c(0, 150)) +
         labs(subtitle = "Innlend dagleg smit") +
         theme(axis.title = element_blank(),
+              axis.ticks.x = element_blank(), 
+              axis.text.x = element_blank(),
               plot.margin = margin(5, 5, 5, 11),
               legend.title = element_blank()) 
     pred_lp
@@ -320,41 +350,62 @@ point_d = d %>% mutate(point_color=if_else(date > ymd('2020-09-28'), 'orange', '
 # 
 # ggsave(here('Results','Figures','Other', paste0('Local_cases_comparison_',Sys.Date(),'.png')),height=4.5,width=16,device='png')
 
-compare_lp <- read_csv(here('Results', 'Data', 'Iceland_posterior_2020-09-29.csv')) %>%
-                rename(y_hat=new_cases) %>%
-                mutate(day = as.numeric(ymd(date)-ymd(pandemic_start_date))) %>%
-                group_by(day) %>%
-                summarise(lower_50 = quantile(y_hat, 0.25),
-                          upper_50 = quantile(y_hat, 0.75),
-                          lower_60 = quantile(y_hat, 0.2),
-                          upper_60 = quantile(y_hat, 0.8),
-                          lower_70 = quantile(y_hat, 0.15),
-                          upper_70 = quantile(y_hat, 0.85),
-                          lower_80 = quantile(y_hat, 0.1),
-                          upper_80 = quantile(y_hat, 0.9),
-                          lower_90 = quantile(y_hat, 0.05),
-                          upper_90 = quantile(y_hat, 0.95),
-                          lower_95 = quantile(y_hat, 0.025),
-                          upper_95 = quantile(y_hat, 0.975)) %>%
-                pivot_longer(c(-day), names_to = c("which", "prob"), names_sep = "_") %>% 
-                pivot_wider(names_from = which, values_from = value) %>% 
-                mutate(prob = parse_number(prob),
-                       date = ymd(pandemic_start_date) + day) %>% 
-                ggplot(aes(date, ymin = lower, ymax = upper)) +
-                geom_ribbon(aes(fill = factor(-prob)), alpha = 0.7) + 
-                geom_point(data = point_d, aes(x = date, y = local, color=point_color), inherit.aes = F) +
-                scale_color_manual(values=c('orange'='#ff8c00', 'black'='black')) + 
-                scale_fill_brewer() +
-                scale_x_date(breaks = sort(c(ymd('2020-09-16'), ymd('2020-10-01'), Sys.Date())),
-                             labels = icelandic_dates,
-                             expand = expansion(add = 0),
-                             limits = c(ymd('2020-09-14'), ymd('2020-11-03'))) +
-                scale_y_continuous(breaks = pretty_breaks(8), expand = expansion(mult = 0), limits=c(0,110)) +
-                labs(subtitle = "Innlend dagleg smit") +
-                theme(axis.title = element_blank(),
-                      plot.margin = margin(5, 5, 5, 11),
-                      legend.title = element_blank()) 
-compare_lp   
+# compare_lp <- read_csv(here('Results', 'Data', 'Iceland_posterior_2020-09-29.csv')) %>%
+#                 rename(y_hat=new_cases) %>%
+#                 mutate(day = as.numeric(ymd(date)-ymd(pandemic_start_date))) %>%
+#                 group_by(day) %>%
+#                 summarise(lower_50 = quantile(y_hat, 0.25),
+#                           upper_50 = quantile(y_hat, 0.75),
+#                           lower_60 = quantile(y_hat, 0.2),
+#                           upper_60 = quantile(y_hat, 0.8),
+#                           lower_70 = quantile(y_hat, 0.15),
+#                           upper_70 = quantile(y_hat, 0.85),
+#                           lower_80 = quantile(y_hat, 0.1),
+#                           upper_80 = quantile(y_hat, 0.9),
+#                           lower_90 = quantile(y_hat, 0.05),
+#                           upper_90 = quantile(y_hat, 0.95),
+#                           lower_95 = quantile(y_hat, 0.025),
+#                           upper_95 = quantile(y_hat, 0.975)) %>%
+#                 pivot_longer(c(-day), names_to = c("which", "prob"), names_sep = "_") %>% 
+#                 pivot_wider(names_from = which, values_from = value) %>% 
+#                 mutate(prob = parse_number(prob),
+#                        date = ymd(pandemic_start_date) + day) %>% 
+#                 ggplot(aes(date, ymin = lower, ymax = upper)) +
+#                 geom_ribbon(aes(fill = factor(-prob)), alpha = 0.7) + 
+#                 geom_point(data = point_d, aes(x = date, y = local, color=point_color), inherit.aes = F) +
+#                 scale_color_manual(values=c('orange'='#ff8c00', 'black'='black')) + 
+#                 scale_fill_brewer() +
+#                 scale_x_date(breaks = sort(c(ymd('2020-09-16'), ymd('2020-10-01'), Sys.Date())),
+#                              labels = icelandic_dates,
+#                              expand = expansion(add = 0),
+#                              limits = c(ymd('2020-09-14'), ymd('2020-11-03'))) +
+#                 scale_y_continuous(breaks = pretty_breaks(8), expand = expansion(mult = 0), limits=c(0,110)) +
+#                 labs(subtitle = "Innlend dagleg smit") +
+#                 theme(axis.title = element_blank(),
+#                       plot.margin = margin(5, 5, 5, 11),
+#                       legend.title = element_blank()) 
+# compare_lp   
+# ggsave(here('Results','Figures', 'Other', paste0('Local_cases_comparison_',Sys.Date(),'.png')),height=4.5,width=16,device='png')
+
+
+compare_lp <- read_csv('Predictions_2020-09-29.csv', col_types=cols()) %>%
+              filter(location == 'Iceland', name == 'new_cases', type=='obs', waves=='latest') %>%
+            pivot_wider(names_from = which, values_from = value) %>% 
+            ggplot(aes(date, ymin = lower, ymax = upper)) +
+            geom_ribbon(aes(fill = factor(-prob)), alpha = 0.7) + 
+            geom_point(data = point_d, aes(x = date, y = local, color=point_color), inherit.aes = F) +
+            scale_color_manual(values=c('orange'='#ff8c00', 'black'='black')) + 
+            scale_fill_brewer() +
+            scale_x_date(breaks = sort(c(ymd('2020-09-16'), ymd('2020-10-01'), Sys.Date())),
+                         labels = icelandic_dates,
+                         expand = expansion(add = 0),
+                         limits = c(ymd('2020-09-14'), ymd('2020-12-01'))) +
+            scale_y_continuous(breaks = pretty_breaks(8), expand = expansion(mult = 0), limits=c(0,110)) +
+            labs(subtitle = "Innlend dagleg smit") +
+            theme(axis.title = element_blank(),
+                  plot.margin = margin(5, 5, 5, 11),
+                  legend.title = element_blank()) 
+compare_lp
 ggsave(here('Results','Figures', 'Other', paste0('Local_cases_comparison_',Sys.Date(),'.png')),height=4.5,width=16,device='png')
 
 
@@ -398,5 +449,44 @@ R_estim_p <- spread_draws(R_estim_m, R[day]) %>%
 R_estim_p
 ggsave(here('Results','Figures', 'Predictions', paste0('R_estimate_',Sys.Date(),'.png')),height=4.5,width=10,device='png')
 
+## Estimate for new cases
+
+R_draws <- spread_draws(m, R[day]) %>% 
+    group_by(day) %>% 
+    mutate(iter = row_number()) %>%
+    ungroup() %>% 
+    select(iter, day, R) %>%
+    mutate(R = 1, R_q=0.6)
+
+posterior_dat <- R_draws %>% filter(day <= 60) %>%
+    group_by(iter) %>% 
+    mutate(prop_quarantine=c(d$prop_quarantine),
+           lambda = c(lambda_vec, rep(0,pred_days-1)),
+           lambda_q = c(lambda_q_vec, rep(0,pred_days-1)),
+           pred_day = if_else(day>N_days, 1,0),
+           mu_hat = R * lambda + R_q*lambda_q + d$border_1) %>% #(day>N_days)*as.numeric(rbinom(n(),size=num_border_tests,prob = prop_imported))) %>% # 
+    # filter(iter %in% 1:100) %>% 
+    group_modify(make_preds, N_days=N_days,SI=SI) %>% 
+    ungroup %>% 
+    mutate(y_hat = rnbinom(n(), mu = mu_hat, size = m$phi[iter])) %>% 
+    pivot_longer(c(-iter, -day, -lambda, -mu_hat)) %>% summarize_posterior_dat
+
+pred_lp <- plot_dat %>% filter(name=='y_hat') %>%
+           ggplot(aes(date, ymin = lower, ymax = upper)) +
+           geom_ribbon(aes(fill = factor(-prob)), alpha = 0.7) +
+           geom_point(data = d, aes(x = date, y = total), inherit.aes = F) +
+           geom_vline(xintercept = as.numeric(intervention_dat$date), lty = 2) +     
+           scale_fill_brewer() +
+           scale_x_date(limits = c(ymd("2020-02-28"), ymd('2020-02-28') + 60), 
+                         expand = expansion(add = 0),
+                         breaks = sort(c(fill_up_dates, intervention_dat$date)),
+                         labels = icelandic_dates) +
+            scale_y_continuous(breaks = pretty_breaks(8), 
+                               expand = expansion(mult = 0)) +
+            labs(subtitle = "Innlend dagleg smit") +
+            theme(axis.title = element_blank(),
+                  plot.margin = margin(5, 5, 5, 11),
+                  legend.title = element_blank()) 
+pred_lp
 
                   
