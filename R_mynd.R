@@ -19,8 +19,7 @@ source('Scenario_EpiEstim.R')
 options(gargle_oauth_email = "karirogg@gmail.com")
 gs4_auth(email = "karirogg@gmail.com")
 
-theme_set(theme_classic(base_size = 12) + 
-              theme(legend.position = "none"))
+theme_set(theme_classic(base_size = 12) + theme(legend.position = "none"))
 icelandic_dates <- function(x) {
     months <- c("janúar", "febrúar", "mars", "apríl", "maí", "júní", 
                 "júlí", "ágúst", "september", "október", "nóvember", "desember")
@@ -220,7 +219,6 @@ intervention_dat$lab_pos_y[9] <- height-1
 intervention_lab_dat <- separate_rows(intervention_dat,lab,sep=';') %>% 
     group_by(date) %>% 
     mutate(lab_pos_y=seq(lab_pos_y[1],lab_pos_y[1]-diff*(n()-1),by=-diff))
-scene = 1
 for(scene in 1:2) {
     future_R <- function(R_t,t) {
         R_t
@@ -232,7 +230,7 @@ for(scene in 1:2) {
         }   
     }
 
-    pred_days <- 42
+    pred_days <- 14
     
     fit_date <- Sys.Date()
     
@@ -376,7 +374,7 @@ compare_lp <-  compare_plot_dat %>% filter(name=='y_hat', prob<95) %>%
 compare_lp
 ggsave(here('Results','Figures', 'Other', paste0('Local_cases_comparison_',Sys.Date(),'2.png')),height=4.5,width=16,device='png')
 
-compare_lp <- read_csv(here('Results', 'Data', 'Iceland_posterior_2020-11-12.csv')) %>%
+compare_lp <- read_csv(here('Results', 'Data', 'Iceland_posterior_2020-11-282.csv')) %>%
     rename(y_hat=new_cases) %>%
     mutate(day = as.numeric(ymd(date)-ymd(pandemic_start_date))) %>%
     group_by(day) %>%
