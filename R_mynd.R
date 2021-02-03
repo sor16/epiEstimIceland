@@ -26,7 +26,7 @@ icelandic_dates <- function(x) {
     
     paste0(mday(x), ". ", months[month(x)])
 }
-fit_date <- Sys.Date()
+fit_date <- ymd("2021-01-14")#Sys.Date()
 
 fill_up_dates <- ymd(c('2020-03-01','2020-04-01','2020-06-01','2020-07-01'))
 
@@ -137,7 +137,7 @@ rp <- spread_draws(m, R[day]) %>%
           plot.margin = margin(5, 5, 5, 14))
 rp
 
-# ggsave(here('Results','Figures','R_t', paste0('Rt_',Sys.Date(),'.pdf')),height=4.5,width=19,device='pdf')
+ # ggsave(here('Results','Figures','R_t', paste0('Rt_',Sys.Date(),'.pdf')),height=4.5,width=19,device='pdf')
 # ggsave(here('Results','Figures','R_t', paste0('Rt_',Sys.Date(),'.png')),height=4.5,width=19,device='png')
 
 # Local cases plot with rolling mean
@@ -208,7 +208,7 @@ height=6.7
 diff=0.5
 extra_diff=2
 
-intervention_dat <- tibble(date=c(ymd(c("2020-03-16","2020-03-24","2020-05-04","2020-06-15","2020-07-31","2020-08-19",'2020-09-07', '2020-09-18', '2020-10-07', '2020-10-20', '2020-10-31'), Sys.Date())),
+intervention_dat <- tibble(date=c(ymd(c("2020-03-16","2020-03-24","2020-05-04","2020-06-15","2020-07-31","2020-08-19",'2020-09-07', '2020-09-18', '2020-10-07', '2020-10-20', '2020-10-31', '2020-01-14'))), #Sys.Date())),
                            lab=c('Samkomur;takmarkaðar;við 100 manns','Samkomur;takmarkaðar;við 20 manns','Fjöldatakmarkanir;rýmkaðar'
                                  ,'Landamæraskimun;hefst','Samkomur;takmarkaðar;við 100 manns','Sóttkví milli;tveggja skimanna;á landamærunum'
                                  ,'Eins metra regla;í stað tveggja;metra reglu', 'Skemmtistöðum;og krám á;höfuðborgar-;svæðinu lokað;tímabundið', 
@@ -233,9 +233,13 @@ intervention_dat$lab_pos_y[9] <- height-1
 intervention_lab_dat <- separate_rows(intervention_dat,lab,sep=';') %>% 
     group_by(date) %>% 
     mutate(lab_pos_y=seq(lab_pos_y[1],lab_pos_y[1]-diff*(n()-1),by=-diff))
-for(scene in 1:2) {
+#for(scene in 1:2) {
+    # future_R <- function(R_t,t) {
+    #     R_t
+    # }
+
     future_R <- function(R_t,t) {
-        R_t
+        ifelse(t>21, (R_t + 2-1.34585)*exp(1/7*log(0.9/2)*7), ifelse(t > 14, (R_t + 2-1.34585)*exp(1/7*log(0.9/2)*(t-14)), ifelse(t > 7, R_t + (2-1.34585), R_t + (2-1.34585)/7*t)))
     }
     if(scene == 2) {
         future_R <- function(R_t,t) {
@@ -244,9 +248,9 @@ for(scene in 1:2) {
         }   
     }
 
-    pred_days <- 14
+    pred_days <- 42
     
-    fit_date <- Sys.Date()
+    fit_date <- #Sys.Date()
     
     posterior_dat <- scenario(m=m,d=d, R_fun = future_R, future_prop_quarantine=rep(0.5, pred_days-1), prop_imported=0,pred_days=pred_days, fit_date=fit_date)
     
@@ -269,12 +273,12 @@ for(scene in 1:2) {
         geom_ribbon(aes(date, ymin = lower, ymax = upper,fill = factor(-prob)), alpha = 0.7) +
         geom_hline(yintercept = 1,col='#BC3C29FF') +
         geom_label(data = intervention_lab_dat, aes(lab_pos_x, lab_pos_y,label=lab), hjust = 0, label.size = NA, fill = 'white') +
-        geom_vline(xintercept = as.numeric(c(intervention_dat$date, ymd('2020-12-24'))), lty = 2) +
+        geom_vline(xintercept = as.numeric(c(intervention_dat$date, ymd('2020-12-24'), ymd('2021-01-14'))), lty = 2) +
         scale_fill_brewer() +
-        scale_x_date(breaks = sort(c(fill_up_dates, intervention_dat$date, ymd('2020-12-24'))),
+        scale_x_date(breaks = sort(c(fill_up_dates, intervention_dat$date, ymd(c('2020-12-24', '2021-01-14')))),
                      labels = icelandic_dates,
                      expand = expansion(add = 0),
-                     limits = c(ymd('2020-07-17'), ymd(end_date) + pred_days-1)) +
+                     limits = c(ymd('2020-07-17'),ymd("2021-01-14") + pred_days-1)) +
         scale_y_continuous(breaks = pretty_breaks(8),expand = c(0,0)) +
         ggtitle(label = waiver(),
                 subtitle = latex2exp::TeX("Sviðsmynd um þróun smitstuðulsins ($R_t$) innanlands utan sóttkvíar")) +
@@ -282,21 +286,24 @@ for(scene in 1:2) {
               plot.margin = margin(5, 5, 5, 14))
     pred_rp
     
+    point_d = d %>% mutate(point_color=if_else(date > ymd('2021-01-14'), 'orange', 'black'))
+    
     #Retrofitted local cases - prediction and history
     pred_lp <-  plot_dat %>% filter(name=='y_hat') %>%
         ggplot(aes(date, ymin = lower, ymax = upper)) +
         geom_ribbon(aes(fill = factor(-prob)), alpha = 0.7) +
-        geom_point(data = d, aes(x = date, y = local), inherit.aes = F) +
-        geom_vline(xintercept = as.numeric(c(intervention_dat$date, ymd('2020-12-24'))), lty = 2) +    
+        geom_point(data = point_d, aes(x = date, y = local, color=point_color), inherit.aes = F) +
+        scale_color_manual(values=c('orange'='#ff8c00', 'black'='black')) + 
+        geom_vline(xintercept = as.numeric(c(intervention_dat$date, ymd('2020-12-24'), ymd("2021-01-14"))), lty = 2) +    
         geom_hline(yintercept=5, col='#BC3C29FF') +
         scale_fill_brewer() +
-        scale_x_date(limits = c(ymd("2020-07-17"), ymd(end_date) + pred_days-1),
+        scale_x_date(limits = c(ymd("2020-07-17"), ymd("2021-01-14") + pred_days-1),
                      expand = expansion(add = 0),
                      breaks = sort(c(fill_up_dates, intervention_dat$date, ymd('2020-12-24'))),
                      labels = icelandic_dates) +
         scale_y_continuous(breaks = pretty_breaks(8), 
                            expand = expansion(mult = 0)) +
-        #coord_cartesian(ylim = c(0, 150)) +
+        coord_cartesian(ylim = c(0, 300)) +
         labs(subtitle = "Innlend dagleg smit") +
         theme(axis.title = element_blank(),
               axis.ticks.x = element_blank(), 
@@ -305,9 +312,9 @@ for(scene in 1:2) {
               legend.title = element_blank()) 
     pred_lp
     plot_grid(pred_rp, pred_lp, ncol = 1, align='v') +
-        ggsave(here("Results", "Figures", "Predictions", paste0('Prediction_',scenarios[scene],'_R_and_local_cases_',Sys.Date(),'.png')), device = 'png', 
-               height = 4.5 * 2, width = 19)
-}
+        ggsave(here("Results", "Figures", "Predictions", paste0('Prediction_bylgja_R_and_local_cases_',Sys.Date(),'.png')), device = 'png',#paste0('Prediction_',scenarios[scene],'_R_and_local_cases_',Sys.Date(),'.png')), device = 'png', 
+               height = 6 * 2, width = 25)
+               #height = 4.5 * 2, width = 19)
 
 height=117
 diff=6

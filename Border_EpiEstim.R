@@ -18,22 +18,23 @@ source("Scenario_EpiEstim.R")
 
 theme_set(theme_classic(base_size = 12) + theme(legend.position = "none"))
 
-make_preds <- function(draws, SI,...) {
+make_preds <- function(draws, SI,pos=1,start_day,...) {
     pop = 356991
-    for (t in 2:nrow(draws)) {
+    for (t in start_day:nrow(draws)) {
         idx_range <- (t-1):1
         draws$lambda[t] <- t((1-draws$prop_quarantine[idx_range])*draws$mu_hat[idx_range]) %*% head(SI,t-1)
         draws$lambda_q[t] <- t(draws$prop_quarantine[idx_range]*draws$mu_hat[idx_range]) %*% head(SI,t-1)
-        draws$lambda_i[t] <- t(draws$imported[idx_range]) %*% head(SI,t-1)
-
+        #draws$lambda_i[t] <- t(draws$imported[idx_range]) %*% head(SI,t-1)
+        draws$lambda_i[t] <- t(draws$imported[(t-1):1]) %*% SI[pos:(t-1+pos-1)]
+        
         draws$mu_hat[t] <- (1-sum(draws$mu_hat)/pop)*(draws$lambda[t] * draws$R[t] + draws$lambda_q[t] * draws$R_q[t] + draws$lambda_i[t] * draws$R_i[t]) #+ draws$mu_hat[t]## add artificially imported infections already stored in mu_hat[t]
     }
     return(draws)
 }
 
-make_preds_smitgat <- function(draws, SI,...) {
+make_preds_smitgat <- function(draws, SI,start_day,...) {
     pop = 356991
-    for (t in 2:nrow(draws)) {
+    for (t in start_day:nrow(draws)) {
         idx_range <- (t-1):1
         draws$lambda[t] <- t((1-draws$prop_quarantine[idx_range])*draws$mu_hat[idx_range]) %*% head(SI,t-1)
         draws$lambda_q[t] <- t(draws$prop_quarantine[idx_range]*draws$mu_hat[idx_range]) %*% head(SI,t-1)
@@ -60,16 +61,17 @@ mod <- read_rds(here("Results", "EpiEstim", str_c("tot.Q.late.border_", '2020-12
 m <- mod$draws() %>% as_draws_df
 
 # Set fixed parameters
-#R <- 0.5
-#Rq <- 0.5
 N_iter <- 2000
-N_days <- 30
+#N_days <- 30
 pred_days <- 60
-#mu <- 4
-prop_q = 0.5
-scenarios <- crossing(R = c(2), pred_days = 60, prevalence=c(1,2), type=c('C','november60', 'PCRv', 'smitgat'))
+mu <- 0
+prop_q = 0
+R_i1 = 1
+R_i2 = 0.5
 
-future_prop_quarantine = rep(0,pred_days)
+scenarios <- crossing(R = c(2), pred_days = 60, prevalence=c("05","1","2"), type=c('PCRv', 'smitgat', "one_test", "two_test_q"), tourists=c(200,500,1000,1500))
+
+future_prop_quarantine = rep(prop_q,pred_days)
 
 delay = 7
 for(j in 1:(pred_days-delay)) {
@@ -79,127 +81,177 @@ for(j in 1:(pred_days-delay)) {
 tmp = tibble(ind = 1:60, pq = future_prop_quarantine) %>% mutate(date = ymd('2020-01-31')+ind)
 ggplot(tmp, aes(date,pq)) + geom_line() + coord_cartesian(ylim=c(0,1)) +
     scale_x_date(breaks=ymd(c('2020-02-01', '2020-03-01')), labels = icelandic_dates)+
-    scale_y_continuous(expand=c(0,0), breaks=c(0,0.5,1), labels=c('0', '0.5', '1')) + ylab("") + xlab("") + 
+    scale_y_continuous(expand=c(0,0), breaks=c(0,0.5,1), labels=c('0', '0.5', '1')) + ylab("") + xlab("") +
     ggsave(here('Results', 'Figures', 'Other', 'sigmoid.png'),height=3,width=5,device='png')
 
-R_i1 = 0.5
-R_i2 = 1
+SI <- get_SI_vec(100)
+
+# Generate infections for N_days days and then estimate imported cases added on for pred_days days
+pre_scenario_dat <- crossing(day = 1:30,iter = seq_len(N_iter)) %>% 
+                    group_by(iter) %>% 
+                    mutate(R = 2,
+                           R_q = m$R_q[iter],
+                           R_i = R_i1,
+                           R_i2 = R_i2,
+                           prop_quarantine=prop_q,
+                           prop_imported = 0,
+                           total = rnbinom(n(), mu = mu, size = m$phi[iter]),
+                           lambda = calculate_lambda(total, SI, 1-prop_quarantine),
+                           lambda_q = calculate_lambda(total, SI, prop_quarantine),
+                           lambda_i = 0,
+                           lambda_i2 = 0,
+                           imported = 0,
+                           infected_first_test = 0,
+                           mu_hat = total)
 
 for(i in 1:nrow(scenarios)) {
     s = scenarios[i,]
+    imported_infections <- read_csv(here("Simulation_Data",paste0("01_", s$tourists, if_else(s$type == "PCRv", "_PCRv_", "_smitgat_"), s$prevalence, ".csv")), col_types = cols()) %>%
+                           mutate(day = as.numeric(difftime(date, ymd('2021-01-01'), units = "days"))) %>%
+                           filter(day <= s$pred_days+30) %>%
+                           #select(sleppa, day) %>%
+                           rename(imported = sleppa) %>%
+                           mutate(iter = rep(1:(n()/60), each=s$pred_days)) %>%
+                           filter(iter <= N_iter)
     
-    # Generate infections for N_days days and then estimate imported cases added on for pred_days days
-    # pre_scenario_dat <- tibble(iter = rep(1:N_iter, each=N_days),
-    #                            day = rep(-(N_days-1):0, times=N_iter), 
-    #                            R = s$R, 
-    #                            R_q = m$R_q,
-    #                            prop_quarantine = s$prop_quarantine,
-    #                            mu_hat = 0
-    #                            ) %>% 
-    #                     mutate(total=0)#rnbinom(n(), mu = s$mu, size = m$phi[iter]))
-
-    tests = 2
-    if(s$type == 'C') tests = 1
+    future_dat <- crossing(day = seq_len(s$pred_days)+30,iter = seq_len(N_iter)) %>% 
+        group_by(iter) %>% 
+        mutate(R = s$R,
+               R_q = m$R_q[iter],
+               R_i = R_i1,
+               R_i2 = R_i2,
+               prop_quarantine=future_prop_quarantine,
+               prop_imported = 0,
+               total = 0,
+               lambda = 0,
+               lambda_q = 0,
+               lambda_i = 0,
+               lambda_i2 = 0,
+               mu_hat = 0) %>%
+        ungroup() %>%
+        mutate(imported = if(s$type == "one_test") c(imported_infections$test2_smitadir[6:nrow(imported_infections)], rep(0,5)) else imported_infections$imported, 
+               infected_first_test = c(imported_infections$test2_smitadir[6:nrow(imported_infections)], rep(0,5)))
     
-    SI <- get_SI_vec(60)
-    imported_infections <- tibble()
-    # if(tests == 0) {
-    #     imported_infections <- read_csv(here("Simulation_Data", paste0("hermanir_1skimun_",s$prevalence, "prosent.csv")), col_types = cols()) %>%
-    #                            mutate(day = as.numeric(difftime(date, ymd('2020-11-17'), units = "days"))) %>%
-    #                            filter(day <= s$pred_days) %>%
-    #                            select(smitadir, day) %>%
-    #                            rename(imported = smitadir) %>%
-    #                            mutate(iter = rep(1:2000, each=s$pred_days)) %>%
-    #                            filter(iter <= N_iter)
-    # } else {
-        imported_infections <- read_csv(here("Simulation_Data",paste0("hermanir_",tests,"skimanir_",s$type, '_',s$prevalence, "prosent.csv")), col_types = cols()) %>%
-                               mutate(day = as.numeric(difftime(date, ymd('2021-01-01'), units = "days"))+1) %>%
-                               filter(day <= s$pred_days) %>%
-                               #select(sleppa, day) %>%
-                               rename(imported = sleppa) %>%
-                               mutate(iter = rep(1:(n()/60), each=s$pred_days)) %>%
-                               filter(iter <= N_iter)
-    #}
+    scenario_dat <- pre_scenario_dat %>% bind_rows(future_dat)
     
     if(s$type == 'smitgat') {
-        imported_infections = imported_infections %>% mutate(infected_first_test = if_else(smitadir-einangrun_eftir_test1 >= 0, smitadir-einangrun_eftir_test1,0))
-        
-        future_dat <- crossing(day = seq_len(s$pred_days),iter = seq_len(N_iter)) %>% 
-            group_by(iter) %>% 
-            mutate(R = s$R,
-                   R_q = m$R_q[iter],
-                   R_i = R_i1,
-                   R_i2 = R_i2,
-                   prop_quarantine=future_prop_quarantine,
-                   prop_imported = 0,
-                   total = 0,
-                   lambda = 0,
-                   lambda_q = 0,
-                   lambda_i = 0,
-                   lambda_i2 = 0,
-                   mu_hat = 0) %>%
-            ungroup() %>%
-            mutate(imported = imported_infections$imported, infected_first_test = imported_infections$infected_first_test)
-        
-        posterior_dat <- future_dat %>%
+        posterior_dat <- scenario_dat %>%
             group_by(iter) %>%
-            group_modify(make_preds_smitgat,SI=SI) %>%
+            group_modify(make_preds_smitgat,SI=SI, start_day=31) %>%
             ungroup %>%
             mutate(y_hat = rnbinom(n(), mu = mu_hat, size = m$phi[iter]))
-        save(posterior_dat, file=here('shiny2' ,'data', paste0("border_", tests, "test_prevalence_", s$prevalence,"_", s$type, ".Rdata")))
+        save(posterior_dat, file=here('shiny2' ,'data', paste0("border_", s$type, "_prevalence_", s$prevalence,"_tourists_",s$tourists, ".Rdata")))
         print(paste('Scenario', i))
     } else {
-        future_dat <- crossing(day = seq_len(s$pred_days),iter = seq_len(N_iter)) %>% 
-            group_by(iter) %>% 
-            mutate(R = s$R,
-                   R_q = m$R_q[iter],
-                   R_i = R_i1,
-                   prop_quarantine=future_prop_quarantine,
-                   prop_imported = 0,
-                   total = 0,
-                   lambda = 0,
-                   lambda_q = 0,
-                   lambda_i = 0,
-                   mu_hat = 0) %>%
-            ungroup() %>%
-            mutate(imported = imported_infections$imported)
-        
-        posterior_dat <- future_dat %>%
+        posterior_dat <- scenario_dat %>%
             group_by(iter) %>%
-            group_modify(make_preds,SI=SI) %>%
+            group_modify(make_preds,SI=SI, pos=if_else(s$type=="one_test", 1, if_else(s$type=="two_test_q", 6, 4)), start_day=31) %>%
             ungroup %>%
-            mutate(y_hat = rnbinom(n(), mu = mu_hat, size = m$phi[iter]))
-        save(posterior_dat, file=here('shiny2' ,'data', paste0("border_", tests, "test_prevalence_", s$prevalence,"_", s$type, ".Rdata")))
+            group_by(day, iter) %>% 
+            mutate(y_hat = if(day>=31) rnbinom(n(), mu = mu_hat, size = m$phi[iter]) else total)
+        save(posterior_dat, file=here('shiny2' ,'data', paste0("border_", s$type, "_prevalence_", s$prevalence,"_tourists_",s$tourists, ".Rdata")))
         print(paste('Scenario', i))
     }
-    
-    
-    
-    # test_label='enga'
-    # if(s$tests == 1) {
-    #     test_label = 'eina'
-    # } else if(s$tests == 2) {
-    #     test_label = 'tvöfalda'
-    # }
-    # 
-    # p <- plot_dat %>% 
-    #     ggplot(aes(day, ymin = lower, ymax = upper)) +
-    #     geom_ribbon(aes(fill = factor(-prob)), alpha = 0.7) +
-    #     scale_fill_brewer() +
-    #     labs(subtitle = paste0("Smit yfir 60 daga tímabil miðað við ", s$prevalence,"% algengi, R=",s$R, " og ", test_label, " landamæraskimun", if_else(R_i == 0.5, " auk ferðamannasmitgátar", ""))) +
-    #     scale_x_continuous(breaks=pretty_breaks(6), expand=c(0,0), limits=c(0,14)) + 
-    #     scale_y_continuous(breaks=pretty_breaks(8), expand=c(0,0)) +
-    #     #coord_cartesian(ylim=c(0,if_else(s$tests == 0, 50, 50))) + 
-    #     theme(axis.title = element_blank(),
-    #           plot.margin = margin(5, 5, 5, 11),
-    #           legend.title = element_blank())
-    # p
-    # 
-    # print(paste('Scenario', i))
-    # ggsave(here('Results','Figures', 'Border', paste0('New_cases_estimate_border_',Sys.Date(),'scenario_',i,'_.png')),height=4.5,width=10,device='png')
 }
 
-# p <- posterior_dat %>% 
+## Create images for text
+
+theme_set(theme_classic(base_size = 12))# + 
+#theme(legend.position = "none"))
+
+plot_results <- function(type, prevalence, tourists,legend=F) {
+    load(here('shiny2', 'data', paste0("border_", type, "_prevalence_", prevalence,"_tourists_", tourists, ".Rdata")))
+    plot_dat <- posterior_dat %>% group_by(day) %>% 
+        summarise(lower_50 = quantile(y_hat, 0.25),
+                  upper_50 = quantile(y_hat, 0.75),
+                  lower_60 = quantile(y_hat, 0.2),
+                  upper_60 = quantile(y_hat, 0.8),
+                  lower_70 = quantile(y_hat, 0.15),
+                  upper_70 = quantile(y_hat, 0.85),
+                  lower_80 = quantile(y_hat, 0.1),
+                  upper_80 = quantile(y_hat, 0.9),
+                  lower_90 = quantile(y_hat, 0.05),
+                  upper_90 = quantile(y_hat, 0.95),
+                  lower_95 = quantile(y_hat, 0.025),
+                  upper_95 = quantile(y_hat, 0.975)) %>%
+        pivot_longer(c(-day), names_to = c("which", "prob"), names_sep = "_") %>% 
+        pivot_wider(names_from = which, values_from = value) %>% 
+        mutate(prob = parse_number(prob), date = ymd("2020-03-01")+day-31)
+    
+    med = posterior_dat %>% group_by(day) %>% summarise(median = median(y_hat)) %>% select(median)
+    med = med$median
+    start_date = Sys.Date()
+    pop = 356991
+    red_day = 100
+    for(t in 45:90) {
+        sum = 0
+        for(i in 1:14) {
+            sum = sum + med[t-i]
+        }
+        if(sum/(pop/100000) >= 150) {
+            red_day = t
+            break
+        }
+    }
+    
+    over_20_day = 100
+    for(t in 30:90) {
+        if(med[t] >= 20) {
+            over_20_day = t
+            break
+        }
+    }
+    
+    type_label =""
+    if(type == 'PCRv')  type_label = "tvær skimanir, PCR vottorð"
+    else if (type == 'smitgat') type_label = "tvær skimanir og ferðamannasmitgát"
+    else if (type == 'one_test') type_label = "ein skimun"
+    else if (type == 'two_test_q') type_label = "tvær skimanir, sóttkví á milli skimana"
+    
+    fills <- tibble(color = c("red", "orange"), xint = c(ymd("2020-02-01")-30+red_day, ymd("2020-02-01")-30+over_20_day), text=c("Ísland á rauðum lista ECDC", "Yfir 20 dagleg smit (miðgildi)"))
+    plot_dat %>% ggplot(aes(date, ymin = lower, ymax = upper)) +
+        geom_ribbon(aes(fill = factor(-prob)), alpha = 0.7, show.legend = F) +
+        scale_fill_brewer() +
+        geom_vline(aes(color="Ísland á rauðum lista ECDC", xintercept=ymd("2020-03-01")-30+red_day), lty=2)+
+        geom_vline(aes(color="Yfir 20 dagleg smit (miðgildi)", xintercept=ymd("2020-03-01")-30+over_20_day), lty=2)+
+        scale_color_manual(values=fills$color) + 
+        labs(subtitle = paste0("Daglegur fjöldi innanlandssmita miðað við ",tourists," ferðamenn,", if_else(prevalence == "05", "0.5", prevalence),"% algengi, R=2 og ", type_label)) +
+        scale_x_date(breaks=c(ymd(c('2020-03-01', if_else((red_day < 85 || red_day > 90) && (over_20_day < 85 || over_20_day > 90),'2020-05-01', '')), ymd("2020-03-01")-30+red_day, ymd("2020-03-01")-30+over_20_day)), expand=c(0,0), labels=icelandic_dates, limits = c(ymd("2020-02-28"), ymd("2020-05-03"))) + 
+        scale_y_continuous(breaks=pretty_breaks(8), expand=c(0,0)) +
+        coord_cartesian(ylim=c(0,150)) + 
+        theme(axis.title = element_blank(),
+              plot.margin = margin(5, 5, 5, 11),
+              legend.title = element_blank(), legend.position=if_else(legend==T, "bottom", "none"), legend.direction="horizontal") 
+}
+    
+plt <- plot_grid(plot_results("one_test", "05", 1000), 
+          plot_results("smitgat", "05", 1000),
+          plot_results("PCRv", "05", 1000),
+          plot_results("two_test_q", "05", 1000),
+          plot_results("one_test", "1", 1000), 
+          plot_results("smitgat", "1", 1000),
+          plot_results("PCRv", "1", 1000),
+          plot_results("two_test_q", "1", 1000),
+          plot_results("one_test", "2", 1000), 
+          plot_results("smitgat", "2", 1000),
+          plot_results("PCRv", "2", 1000),
+          plot_results("two_test_q", "2", 1000),
+          ncol = 4, nrow=3, align='h')  
+
+plot_results("one_test", "05", 1000, legend = T)
+
+title <- ggdraw() + draw_label("Spá yfir 60 daga tímabil miðað við 1000 ferðamenn á dag", fontface='bold')
+plot_grid(title, plt, ncol=1, rel_heights=c(0.1, 1)) +
+    ggsave(here("Results", "Figures","Other", paste0("Border_scenarios.png")), device = "png", height = 12, width = 22)  
+
+
+for(i in 1:nrow(scenarios)) {
+    plot_results(scenarios[i,]$type, scenarios[i,]$prevalence, scenarios[i,]$tourists, legend=T) + 
+        ggsave(here("Results", "Figures", "Other", paste0("COVID_19_svidsmynd_",case_when(scenarios[i,]$type=="one_test" ~ "ein_skimun_", scenarios[i,]$type=="PCRv" ~ "PCRv_", scenarios[i,]$type=="two_test_q" ~ "tvaer_skimanir_sottkvi_", scenarios[i,]$type=="smitgat" ~ "smitgat_"), scenarios[i,]$prevalence, "_algengi_", scenarios[i,]$tourists, "_ferdamenn.png")),
+               device = "png", height = 8, width = 16)
+}
+
+ # p <- posterior_dat %>% 
 #     group_by(iter) %>%
 #     mutate(cumc = cumsum(y_hat)) %>%
 #     ungroup %>%
